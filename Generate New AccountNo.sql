@@ -11,14 +11,39 @@ BEGIN
 
     -- Insert statements for procedure here
 Declare @series varchar(3),@check int,@checkdigit int, @iSeries int
-Declare @Accountnumber Varchar(24), @AccountTemp Varchar(24), @AccountPart varchar(24), @Book Varchar(20), @RandomTwoDigit VARCHAR(2)
+Declare @Accountnumber Varchar(24), @AccountTemp Varchar(24), @AccountPart varchar(24), @Book Varchar(20), @RandomTwoDigit VARCHAR(2), @ErrMessage Varchar(200)
+
+IF NOT EXISTS (
+	SELECT 1 
+	FROM DistributionSubStation 
+	WHERE DistributionID = @DssId AND BUID = @BU
+)
+BEGIN
+	SET @ErrMessage = 'Invalid Distribution ID: "' + @DssId + '" does not exist for Business Hub "' + @BU + '".'
+	SET @Accountnumber = -1
+END
+
+IF NOT EXISTS (
+	SELECT 1 
+	FROM DistributionSubStation 
+	WHERE FeederID = @AssetId AND BUID = @BU AND DistributionID = @DssId
+)
+BEGIN
+	SET @ErrMessage = 'Invalid Feeder ID: "' + @AssetId + '" not found under Distribution ID "' + @DssId + '" and Business Hub "' + @BU + '".'
+	SET @Accountnumber = -1
+END
+
+IF NOT EXISTS (
+	SELECT 1 
+	FROM Undertaking
+	WHERE UTID = @Utid AND BUID = @BU  
+)
+BEGIN
+	SET @ErrMessage = 'The specified Undertaking ID "' + @Utid + '" does not exist for the provided Business Unit "' + @BU + '".'
+	SET @Accountnumber = -1
+END
 
 
---IF Not Exists (Select 1 from DistributionSubStation Where DistributionID = @DssId And FeederID= @AssetId And UTID = @Utid)
---Begin
---	Raiserror('The Specified Utid does not exists for the DssId and AssetId provided',16,1)
---	Return 
---End
     SET @RandomTwoDigit = RIGHT('0' + CAST(CAST(RAND() * 99 + 1 AS INT) AS VARCHAR(2)), 2)
 
 	SET @Book = @Utid + '/'+ @RandomTwoDigit
@@ -32,7 +57,26 @@ Select Top 1 @series = SerialNo from CustomerAccountNoGenerated
 				ORDER BY SerialNo DESC
 
 IF @series Is Null
-	Set @series = '000'
+	Set @series = '001'
+
+IF NOT EXISTS (
+	SELECT 1 
+	FROM UndertakingBookNumber 
+	WHERE Booknumber = @Book
+)
+BEGIN
+	INSERT INTO UndertakingBookNumber (
+		Booknumber,
+		UTID,
+		TransID,
+		billingefficiency,
+		energyusededitable,
+		isMD,
+		buid,
+		rowguid
+)
+	Values(@Book, @Utid, @Utid, 78.0, 0, 0, @BU, NEWID())
+End
 				
 IF @series = '999'
 BEGIN
@@ -74,6 +118,8 @@ BEGIN
 		INSERT INTO CustomerAccountNoGenerated
 		(BookNo, SerialNo, AccountNo, DateGenerated, Status, BUID, Utid, DssId, AssetId)
 		VALUES (@Book, @series, @Accountnumber, GETDATE(), 0, @BU, @Utid, @DssId, @AssetId)
+
+		Set @ErrMessage= 'New Account Number Generated Successfully'
 	END
 	ELSE
 		SET @Accountnumber = -1
@@ -83,7 +129,7 @@ ELSE
 	SET @Accountnumber = -1
 	
 	--Output
-	SELECT @Accountnumber
+	SELECT @Accountnumber As AccountNumber, @ErrMessage As ErrorMessage
 END
 
 GO
