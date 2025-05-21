@@ -117,7 +117,7 @@ BEGIN
 	BEGIN
 		INSERT INTO CustomerAccountNoGenerated
 		(BookNo, SerialNo, AccountNo, DateGenerated, Status, BUID, Utid, DssId, AssetId)
-		VALUES (@Book, @series, @Accountnumber, GETDATE(), 0, @BU, @Utid, @DssId, @AssetId)
+		VALUES (@Book, @series, @Accountnumber, GETDATE(), 1, @BU, @Utid, @DssId, @AssetId)
 
 		Set @ErrMessage= 'New Account Number Generated Successfully'
 	END
