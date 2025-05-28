@@ -2,7 +2,7 @@
 
 ALTER PROCEDURE [dbo].[up_generate_account_no_New] 
 	-- Add the parameters for the stored procedure here
-	@Utid Varchar(6), @BU Varchar(10), @DssId Varchar(25), @AssetId Varchar(25)
+	@Utid Varchar(6), @BU Varchar(5), @DssId Varchar(50), @AssetId Varchar(50)
 AS
 BEGIN
 	-- SET NOCOUNT ON added to prevent extra result sets from
@@ -11,7 +11,7 @@ BEGIN
 
     -- Insert statements for procedure here
 Declare @series varchar(3),@check int,@checkdigit int, @iSeries int
-Declare @Accountnumber Varchar(24), @AccountTemp Varchar(24), @AccountPart varchar(24), @Book Varchar(20), @RandomTwoDigit VARCHAR(2), @ErrMessage Varchar(200)
+Declare @Accountnumber Varchar(24), @AccountTemp Varchar(24), @AccountPart varchar(24), @Book Varchar(20), @RandomTwoDigit VARCHAR(2), @ErrMessage Varchar(200),@ErrorCode Int
 
 IF NOT EXISTS (
 	SELECT 1 
@@ -20,7 +20,7 @@ IF NOT EXISTS (
 )
 BEGIN
 	SET @ErrMessage = 'Invalid Distribution ID: "' + @DssId + '" does not exist for Business Hub "' + @BU + '".'
-	SET @Accountnumber = -1
+	SET @ErrorCode = 1001
 END
 
 IF NOT EXISTS (
@@ -30,7 +30,7 @@ IF NOT EXISTS (
 )
 BEGIN
 	SET @ErrMessage = 'Invalid Feeder ID: "' + @AssetId + '" not found under Distribution ID "' + @DssId + '" and Business Hub "' + @BU + '".'
-	SET @Accountnumber = -1
+	SET @ErrorCode = 1002
 END
 
 IF NOT EXISTS (
@@ -40,7 +40,7 @@ IF NOT EXISTS (
 )
 BEGIN
 	SET @ErrMessage = 'The specified Undertaking ID "' + @Utid + '" does not exist for the provided Business Unit "' + @BU + '".'
-	SET @Accountnumber = -1
+	SET @ErrorCode = 1003
 END
 
 
@@ -120,6 +120,7 @@ BEGIN
 		VALUES (@Book, @series, @Accountnumber, GETDATE(), 1, @BU, @Utid, @DssId, @AssetId)
 
 		Set @ErrMessage= 'New Account Number Generated Successfully'
+		Set @ErrorCode= 0
 	END
 	ELSE
 		SET @Accountnumber = -1
@@ -129,7 +130,7 @@ ELSE
 	SET @Accountnumber = -1
 	
 	--Output
-	SELECT @Accountnumber As AccountNumber, @ErrMessage As ErrorMessage
+	SELECT @Accountnumber As AccountNumber, @ErrorCode As ErrorCode, @ErrMessage As ErrorMessage
 END
 
 GO

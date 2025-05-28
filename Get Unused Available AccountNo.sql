@@ -1,10 +1,10 @@
 
 
 Alter PROCEDURE Up_Get_UnusedAvailableAccountNoGenerated
-    @Buid VARCHAR(10)
+    @Buid VARCHAR(5), @Utid Varchar(6)
 AS
 BEGIN
-    DECLARE @ErrMessage VARCHAR(200)
+    DECLARE @ErrMessage VARCHAR(200),@ErrorCode Int
 
     IF EXISTS (
         SELECT 1
@@ -14,7 +14,7 @@ BEGIN
     BEGIN
         SELECT AccountNo
         FROM CustomerAccountNoGenerated
-        WHERE Status = 0 AND BUID = @Buid
+        WHERE Status = 0 AND BUID = @Buid And Utid= @Utid
     END
     ELSE
     BEGIN
