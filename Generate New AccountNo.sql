@@ -1,3 +1,5 @@
+
+
 ALTER PROCEDURE [dbo].[up_generate_account_no_New] 
     @Utid VARCHAR(6), 
     @BU VARCHAR(5), 
@@ -20,7 +22,10 @@ BEGIN
         @ErrMessage VARCHAR(200),
         @ErrorCode INT,
         @DbName VARCHAR(50),
-        @LinkServerIp VARCHAR(50)
+		@UndertakeRowguid UNIQUEIDENTIFIER,
+		@CustAccGenRowguid UNIQUEIDENTIFIER,
+        @LinkServerIp VARCHAR(50),
+		@SQL NVARCHAR(MAX) 
 
     -- Input validation
     IF NOT EXISTS (
@@ -59,8 +64,19 @@ BEGIN
     SET @RandomTwoDigit = RIGHT('0' + CAST(CAST(RAND() * 99 + 1 AS INT) AS VARCHAR(2)), 2)
     SET @Book = @Utid + '/' + @RandomTwoDigit
 
-    BEGIN TRY
-        BEGIN TRANSACTION
+	SET @UndertakeRowguid = NEWID();
+	SET @CustAccGenRowguid = NEWID();
+
+	BEGIN TRY
+
+    -- Get linked server info
+    SELECT 
+        @LinkServerIp = LinkServerIP, 
+        @DbName = DBname 
+    FROM LinkServerInfo 
+    WHERE BUID = @BU;
+
+	BEGIN TRANSACTION
         
         -- Lock and get last used serial
         SELECT TOP 1 @series = SerialNo 
@@ -71,12 +87,6 @@ BEGIN
         IF @series IS NULL
             SET @series = '001'
 
-        -- Get linked server info
-        SELECT 
-            @LinkServerIp = LinkServerIP, 
-            @DbName = DBname 
-        FROM LinkServerInfo 
-        WHERE BUID = @BU;
 
         -- Ensure UndertakingBookNumber exists
         IF NOT EXISTS (SELECT 1 FROM UndertakingBookNumber WHERE Booknumber = @Book)
@@ -85,18 +95,9 @@ BEGIN
                 Booknumber, UTID, TransID, billingefficiency,
                 energyusededitable, isMD, buid, rowguid
             )
-            VALUES (@Book, @Utid, @Utid, 78.0, 0, 0, @BU, NEWID())
+            VALUES (@Book, @Utid, @Utid, 78.0, 0, 0, @BU, @UndertakeRowguid)
 
-            DECLARE @SQL1 NVARCHAR(MAX) = N'
-                INSERT INTO [' + @LinkServerIp + '].[' + @DbName + '].[dbo].UndertakingBookNumber (
-                    Booknumber, UTID, TransID, billingefficiency,
-                    energyusededitable, isMD, buid, rowguid
-                )
-                VALUES (@Book, @Utid, @Utid, 78.0, 0, 0, @BU, NEWID())';
-
-            EXEC sp_executesql @SQL1, 
-                N'@Book VARCHAR(20), @Utid VARCHAR(6), @BU VARCHAR(5)', 
-                @Book, @Utid, @BU
+          
         END
 
         -- Handle serial overflow
@@ -160,33 +161,59 @@ BEGIN
         -- Insert locally
         INSERT INTO CustomerAccountNoGenerated (
             BookNo, SerialNo, AccountNo, DateGenerated,
-            Status, BUID, Utid, DssId, AssetId
+            Status, BUID,rowguid, Utid, DssId, AssetId
         )
         VALUES (
             @Book, @series, @Accountnumber, GETDATE(),
-            1, @BU, @Utid, @DssId, @AssetId
+            0, @BU, @CustAccGenRowguid, @Utid, @DssId, @AssetId
         )
 
-        -- Insert to linked server
-        DECLARE @SQL2 NVARCHAR(MAX) = N'
+		COMMIT TRANSACTION
+
+    BEGIN TRY
+        
+		SET @SQL = N'
+            IF NOT EXISTS (SELECT 1 FROM [' + @LinkServerIp + '].[' + @DbName + '].[dbo].UndertakingBookNumber 
+                          WHERE Booknumber = @Book AND buid = @BU)
+            BEGIN
+                INSERT INTO [' + @LinkServerIp + '].[' + @DbName + '].[dbo].UndertakingBookNumber (
+                    Booknumber, UTID, TransID, billingefficiency,
+                    energyusededitable, isMD, buid, rowguid
+                )
+                VALUES (@Book, @Utid, @Utid, 78.0, 0, 0, @BU, @UndertakeRowguid)
+            END'
+
+        EXEC sp_executesql @SQL, 
+            N'@Book VARCHAR(20), @Utid VARCHAR(6), @BU VARCHAR(5), @UndertakeRowguid UNIQUEIDENTIFIER', 
+            @Book, @Utid, @BU, @UndertakeRowguid
+
+        -- Insert to remote CustomerAccountNoGenerated
+        SET @SQL = N'
             INSERT INTO [' + @LinkServerIp + '].[' + @DbName + '].[dbo].CustomerAccountNoGenerated (
                 BookNo, SerialNo, AccountNo, DateGenerated,
-                Status, BUID, Utid, DssId, AssetId
+                Status, BUID, rowguid, Utid, DssId, AssetId
             )
             VALUES (
                 @Book, @series, @Accountnumber, GETDATE(),
-                1, @BU, @Utid, @DssId, @AssetId
-            )';
+                0, @BU, @CustAccGenRowguid, @Utid, @DssId, @AssetId
+            )'
 
-        EXEC sp_executesql @SQL2, 
-            N'@Book VARCHAR(20), @series VARCHAR(3), @Accountnumber VARCHAR(24), @BU VARCHAR(5), @Utid VARCHAR(6), @DssId VARCHAR(50), @AssetId VARCHAR(50)', 
-            @Book, @series, @Accountnumber, @BU, @Utid, @DssId, @AssetId
+        EXEC sp_executesql @SQL, 
+            N'@Book VARCHAR(20), @series VARCHAR(3), @Accountnumber VARCHAR(24), @BU VARCHAR(5), 
+              @Utid VARCHAR(6), @DssId VARCHAR(50), @AssetId VARCHAR(50), @CustAccGenRowguid UNIQUEIDENTIFIER', 
+            @Book, @series, @Accountnumber, @BU, @Utid, @DssId, @AssetId, @CustAccGenRowguid
 
-        SET @ErrMessage = 'New Account Number Generated Successfully'
+
+        SET @ErrMessage = 'Account number generated successfully! Please obtain supervisor approval to finalize customer registration.'
         SET @ErrorCode = 0
 
-        COMMIT TRANSACTION
     END TRY
+	BEGIN CATCH
+        -- Log remote error but don't fail the operation
+        SET @ErrMessage = 'Account generated locally but remote sync failed: ' + ERROR_MESSAGE()
+        SET @ErrorCode = 1006
+    END CATCH
+	END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
         SET @ErrMessage = ERROR_MESSAGE()
@@ -197,6 +224,6 @@ OutputResult:
     SELECT 
         @Accountnumber AS AccountNumber, 
         @ErrorCode AS Code, 
-        @ErrMessage AS Message
+        @ErrMessage AS Message 
 END
 GO
